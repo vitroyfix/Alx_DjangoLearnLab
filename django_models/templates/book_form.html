@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ action }} Book</title>
+</head>
+<body>
+    <h1>{{ action }} Book</h1>
+    <form method="post">
+        {% csrf_token %}
+        <label>Title:</label>
+        <input type="text" name="title" value="{% if book %}{{ book.title }}{% endif %}" required>
+        <label>Author:</label>
+        <select name="author" required>
+            {% for author in authors %}
+            <option value="{{ author.id }}"
+                {% if book and book.author.id == author.id %}selected{% endif %}>
+                {{ author.name }}
+            </option>
+            {% endfor %}
+        </select>
+        <button type="submit">{{ action }}</button>
+    </form>
+</body>
+</html>
