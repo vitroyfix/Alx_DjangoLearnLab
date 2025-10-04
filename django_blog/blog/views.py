@@ -7,9 +7,11 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 
 from .models import Post, Comment
-from .forms import UserRegisterForm, PostForm, CommentForm
+from .forms import UserRegisterForm, UserUpdateForm, PostForm, CommentForm
 
+# ------------------------
 # Authentication Views
+# ------------------------
 def register(request):
     if request.method == 'POST':
         form = UserRegisterForm(request.POST)
@@ -24,12 +26,17 @@ def register(request):
 @login_required
 def profile(request):
     if request.method == 'POST':
-        request.user.email = request.POST.get('email', request.user.email)
-        request.user.save()
-        return redirect('profile')
-    return render(request, 'blog/profile.html')
+        form = UserUpdateForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            return redirect('profile')
+    else:
+        form = UserUpdateForm(instance=request.user)
+    return render(request, 'blog/profile.html', {'form': form})
 
+# ------------------------
 # Post Views
+# ------------------------
 class PostListView(ListView):
     model = Post
     template_name = 'blog/post_list.html'
@@ -68,10 +75,24 @@ class PostDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
         post = self.get_object()
         return self.request.user == post.author
 
+# ------------------------
+# Post by Tag View
+# ------------------------
+class PostByTagListView(ListView):
+    model = Post
+    template_name = 'blog/post_list.html'
+    context_object_name = 'posts'
+
+    def get_queryset(self):
+        tag_slug = self.kwargs.get('tag_slug')
+        return Post.objects.filter(tags__slug=tag_slug).distinct()
+
+# ------------------------
 # Comment Views
+# ------------------------
 @login_required
-def add_comment(request, pk):
-    post = get_object_or_404(Post, pk=pk)
+def add_comment(request, post_id):
+    post = get_object_or_404(Post, pk=post_id)
     if request.method == 'POST':
         form = CommentForm(request.POST)
         if form.is_valid():
@@ -79,7 +100,7 @@ def add_comment(request, pk):
             comment.author = request.user
             comment.post = post
             comment.save()
-            return redirect('post-detail', pk=pk)
+            return redirect('post-detail', pk=post_id)
     else:
         form = CommentForm()
     return render(request, 'blog/comment_form.html', {'form': form})
@@ -105,7 +126,9 @@ def delete_comment(request, pk):
         comment.delete()
     return redirect('post-detail', pk=comment.post.pk)
 
+# ------------------------
 # Search View
+# ------------------------
 def search_posts(request):
     query = request.GET.get('q')
     posts = Post.objects.filter(
