@@ -1,54 +1,68 @@
-# accounts/views.py
-from rest_framework import generics, permissions, status, viewsets
+from rest_framework import generics, viewsets, permissions, status
 from rest_framework.response import Response
-from rest_framework.views import APIView
-from rest_framework.decorators import action
-from .serializers import RegisterSerializer, LoginSerializer, UserSerializer
-from .models import User
-from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate, get_user_model
 from django.shortcuts import get_object_or_404
+from rest_framework.decorators import action
+from .serializers import RegisterSerializer, LoginSerializer, ProfileSerializer
+from .models import User
+
+UserModel = get_user_model()
 
 class RegisterView(generics.CreateAPIView):
+    """Register and auto-create token"""
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
-    def create(self, request, *args, **kwargs):
-        # return token on successful registration (serializer already provides token field)
-        return super().create(request, *args, **kwargs)
+class LoginView(generics.GenericAPIView):
+    serializer_class = LoginSerializer
+    permission_classes = [permissions.AllowAny]
 
-class LoginView(ObtainAuthToken):
-    # returns token - can be used by clients
     def post(self, request, *args, **kwargs):
-        serializer = self.serializer_class(data=request.data, context={'request': request})
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.validated_data['user']
+        username = serializer.validated_data['username']
+        password = serializer.validated_data['password']
+        user = authenticate(username=username, password=password)
+        if not user:
+            return Response({'detail': 'Invalid credentials'}, status=status.HTTP_400_BAD_REQUEST)
         token, _ = Token.objects.get_or_create(user=user)
         return Response({'token': token.key, 'user_id': user.pk, 'username': user.username})
 
 class ProfileViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
+    """
+    /api/accounts/profiles/
+    Supports:
+        - list, retrieve (read)
+        - update, partial_update (only owner)
+        - custom actions: /<pk>/follow/ and /<pk>/unfollow/
+    """
+    queryset = User.objects.all().order_by('id')
+    serializer_class = ProfileSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
     def get_permissions(self):
-        # allow updates only by the owner
-        if self.action in ['update', 'partial_update', 'destroy']:
+        if self.action in ['update','partial_update','destroy']:
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
+
+    def perform_update(self, serializer):
+        # only allow user to update own profile
+        if self.request.user != serializer.instance:
+            return Response({'detail': 'You may only update your own profile.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer.save()
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def follow(self, request, pk=None):
         target = get_object_or_404(User, pk=pk)
-        user = request.user
-        if target == user:
+        if target == request.user:
             return Response({'detail': "You can't follow yourself."}, status=status.HTTP_400_BAD_REQUEST)
-        target.followers.add(user)
-        return Response({'detail': f'Now following {target.username}.'})
+        target.followers.add(request.user)
+        # optional: create notification (notifications app)
+        return Response({'detail': f'You are now following {target.username}.'}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def unfollow(self, request, pk=None):
         target = get_object_or_404(User, pk=pk)
-        user = request.user
-        target.followers.remove(user)
-        return Response({'detail': f'Unfollowed {target.username}.'})
+        target.followers.remove(request.user)
+        return Response({'detail': f'You unfollowed {target.username}.'}, status=status.HTTP_200_OK)
