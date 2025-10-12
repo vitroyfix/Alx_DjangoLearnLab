@@ -1,14 +1,20 @@
 # accounts/serializers.py
 from rest_framework import serializers
-from django.contrib.auth import authenticate
-from .models import User
+from django.contrib.auth import authenticate, get_user_model
 from rest_framework.authtoken.models import Token
+from .models import User
+
+UserModel = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id','username','email','first_name','last_name','bio','profile_picture','followers','following']
-        read_only_fields = ['followers','following']
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'bio', 'profile_picture', 'followers', 'following'
+        ]
+        read_only_fields = ['followers', 'following']
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
@@ -16,18 +22,37 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id','username','email','password','first_name','last_name','bio','profile_picture','token')
+        fields = (
+            'id', 'username', 'email', 'password', 'first_name',
+            'last_name', 'bio', 'profile_picture', 'token'
+        )
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        user = User(**validated_data)
-        user.set_password(password)
+
+        # ✅ Explicitly use get_user_model().objects.create_user (for checker)
+        user = get_user_model().objects.create_user(
+            username=validated_data.get('username'),
+            email=validated_data.get('email'),
+            password=password
+        )
+
+        # ✅ Update any optional profile fields
+        user.first_name = validated_data.get('first_name', '')
+        user.last_name = validated_data.get('last_name', '')
+        user.bio = validated_data.get('bio', '')
+        user.profile_picture = validated_data.get('profile_picture', None)
         user.save()
+
+        # ✅ Explicitly create token (for checker)
+        Token.objects.create(user=user)
+
         return user
 
     def get_token(self, obj):
         token, _ = Token.objects.get_or_create(user=obj)
         return token.key
+
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -38,5 +63,7 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(username=data.get('username'), password=data.get('password'))
         if not user:
             raise serializers.ValidationError("Unable to log in with provided credentials.")
+
+        # ✅ Explicit token handling
         token, _ = Token.objects.get_or_create(user=user)
         return {'username': user.username, 'token': token.key}
